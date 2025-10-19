@@ -7,7 +7,7 @@ set SRC=src
 set OUT=out
 set JAR=framework.jar
 set TEST_DIR=..\test\WEB-INF\lib
-set TOMCAT_HOME=C:\apache-tomcat-10.1.28
+set TOMCAT_HOME=C:\Tomcat\apache-tomcat-10.1.48
 
 echo.
 echo === Compilation du framework ===
@@ -33,11 +33,6 @@ copy /Y "%JAR%" "%TEST_DIR%"
 echo.
 echo === Déploiement dans Tomcat ===
 xcopy /E /I /Y "..\test" "%TOMCAT_HOME%\webapps\test"
-
-echo.
-echo === Redémarrage de Tomcat ===
-"%TOMCAT_HOME%\bin\shutdown.bat"
-"%TOMCAT_HOME%\bin\startup.bat"
 
 echo.
 echo === Déploiement terminé ! ===

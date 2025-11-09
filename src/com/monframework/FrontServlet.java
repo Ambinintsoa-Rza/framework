@@ -11,6 +11,50 @@ import com.monframework.annotations.UrlMapping;
 
 public class FrontServlet extends HttpServlet {
 
+    // Map qui relie une URL à sa méthode et son contrôleur
+    private Map<String, MethodMapping> mappings = new HashMap<>();
+
+    // Petite classe interne pour stocker le contrôleur et la méthode
+    private static class MethodMapping {
+        Class<?> controllerClass;
+        Method method;
+
+        MethodMapping(Class<?> controllerClass, Method method) {
+            this.controllerClass = controllerClass;
+            this.method = method;
+        }
+    }
+
+    //appelé une seule fois
+    @Override
+    public void init() throws ServletException {
+        try {
+            List<Class<?>> controllers = getControllers("com.test");
+
+            for (Class<?> cls : controllers) {
+                for (Method m : cls.getDeclaredMethods()) {
+                    if (m.isAnnotationPresent(UrlMapping.class)) {
+                        UrlMapping mapping = m.getAnnotation(UrlMapping.class);
+                        mappings.put(mapping.value(), new MethodMapping(cls, m));
+                    }
+                }
+            }
+
+            System.out.println("=== MAPPINGS DETECTÉS ===");
+            for (Map.Entry<String, MethodMapping> entry : mappings.entrySet()) {
+                System.out.println(entry.getKey() + " -> "
+                        + entry.getValue().controllerClass.getName() + "."
+                        + entry.getValue().method.getName());
+            }
+            System.out.println("===========================");
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            throw new ServletException(e);
+        }
+    }
+
+    //appelé à chaque requete
     @Override
     protected void service(HttpServletRequest req, HttpServletResponse resp)
             throws ServletException, IOException {
@@ -23,42 +67,21 @@ public class FrontServlet extends HttpServlet {
         PrintWriter out = resp.getWriter();
 
         try {
-            // 1. Lister tous les controlleurs detectes
-            List<Class<?>> controllers = getControllers("com.test");
+            MethodMapping mapping = mappings.get(relativePath);
 
-            out.println("=== Liste des classes avec @Controller detectees ===");
-            if (controllers.isEmpty()) {
-                out.println("(Aucun controleur trouve)");
+            if (mapping != null) {
+                out.println("=== ROUTE TROUVÉE ===");
+                out.println("Controller : " + mapping.controllerClass.getName());
+                out.println("Méthode    : " + mapping.method.getName());
+                out.println("=======================");
+
+                Object controllerInstance = mapping.controllerClass.getDeclaredConstructor().newInstance();
+                Object result = mapping.method.invoke(controllerInstance);
+
+                out.println();
+                out.println("Résultat : " + result);
             } else {
-                for (Class<?> c : controllers) {
-                    out.println("-> " + c.getName());
-                }
-            }
-            out.println("========================================");
-            out.println();
-
-            // 2. Parcourir les controlleurs pour trouver la methode correspondant a l'URL
-            boolean found = false;
-            for (Class<?> cls : controllers) {
-                Object controllerInstance = cls.getDeclaredConstructor().newInstance();
-
-                for (Method m : cls.getDeclaredMethods()) {
-                    if (m.isAnnotationPresent(UrlMapping.class)) {
-                        UrlMapping mapping = m.getAnnotation(UrlMapping.class);
-
-                        if (mapping.value().equals(relativePath)) {
-                            Object result = m.invoke(controllerInstance);
-                            out.println("Resultat methode : " + result);
-                            found = true;
-                            break;
-                        }
-                    }
-                }
-                if (found) break;
-            }
-
-            if (!found) {
-                out.println("Aucune methode trouvee pour : " + relativePath);
+                out.println("Aucune méthode trouvée pour : " + relativePath);
             }
 
         } catch (Exception e) {
@@ -66,6 +89,7 @@ public class FrontServlet extends HttpServlet {
         }
     }
 
+    //Recherche des classes annotées @Controller dans un package donné.
     private List<Class<?>> getControllers(String basePackage) {
         List<Class<?>> controllers = new ArrayList<>();
         String path = getServletContext().getRealPath("/WEB-INF/classes/" + basePackage.replace('.', '/'));
@@ -79,7 +103,8 @@ public class FrontServlet extends HttpServlet {
         scanDirectory(directory, basePackage, controllers);
         return controllers;
     }
-
+    
+    //Parcours récursif du répertoire pour trouver les classes @Controller.
     private void scanDirectory(File folder, String packageName, List<Class<?>> controllers) {
         for (File file : Objects.requireNonNull(folder.listFiles())) {
             if (file.isDirectory()) {

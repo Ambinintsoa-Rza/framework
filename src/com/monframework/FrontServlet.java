@@ -8,6 +8,7 @@ import java.util.*;
 
 import com.monframework.annotations.Controller;
 import com.monframework.annotations.UrlMapping;
+import com.monframework.model.ModelView;
 
 public class FrontServlet extends HttpServlet {
 
@@ -54,40 +55,59 @@ public class FrontServlet extends HttpServlet {
         }
     }
 
-    //appelé à chaque requete
-    @Override
-    protected void service(HttpServletRequest req, HttpServletResponse resp)
-            throws ServletException, IOException {
+@Override
+protected void service(HttpServletRequest req, HttpServletResponse resp)
+        throws ServletException, IOException {
 
-        String uri = req.getRequestURI();
-        String context = req.getContextPath();
-        String relativePath = uri.substring(context.length());
+    String uri = req.getRequestURI();
+    String context = req.getContextPath();
+    String relativePath = uri.substring(context.length());
 
-        resp.setContentType("text/plain;charset=UTF-8");
-        PrintWriter out = resp.getWriter();
+    resp.setContentType("text/plain;charset=UTF-8");
+    PrintWriter out = resp.getWriter();
 
-        try {
-            MethodMapping mapping = mappings.get(relativePath);
+    try {
+        MethodMapping mapping = mappings.get(relativePath);
 
-            if (mapping != null) {
-                out.println("=== ROUTE TROUVÉE ===");
-                out.println("Controller : " + mapping.controllerClass.getName());
-                out.println("Méthode    : " + mapping.method.getName());
-                out.println("=======================");
+        if (mapping != null) {
+            out.println("=== ROUTE TROUVÉE ===");
+            out.println("Controller : " + mapping.controllerClass.getName());
+            out.println("Méthode    : " + mapping.method.getName());
+            out.println("=======================");
 
-                Object controllerInstance = mapping.controllerClass.getDeclaredConstructor().newInstance();
-                Object result = mapping.method.invoke(controllerInstance);
+            Object controllerInstance = mapping.controllerClass.getDeclaredConstructor().newInstance();
+            Object result = mapping.method.invoke(controllerInstance);
 
-                out.println();
-                out.println("Résultat : " + result);
+            // ================================
+            //      GESTION DES RETOURS
+            // ================================
+
+            if (result instanceof String) {
+                out.println(result);
+
+            } else if (result instanceof ModelView) {
+                ModelView mv = (ModelView) result;
+
+                // Forward vers JSP
+                RequestDispatcher dispatcher =
+                        req.getRequestDispatcher("/" + mv.getView());
+                dispatcher.forward(req, resp);
+                return;
+
             } else {
-                out.println("Aucune méthode trouvée pour : " + relativePath);
+                out.println("Type de retour non supporté : "
+                        + (result != null ? result.getClass() : "null"));
             }
 
-        } catch (Exception e) {
-            e.printStackTrace(out);
+        } else {
+            out.println("Aucune méthode trouvée pour : " + relativePath);
         }
+
+    } catch (Exception e) {
+        e.printStackTrace(out);
     }
+}
+
 
     //Recherche des classes annotées @Controller dans un package donné.
     private List<Class<?>> getControllers(String basePackage) {

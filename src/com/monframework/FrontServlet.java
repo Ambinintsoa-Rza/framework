@@ -88,6 +88,11 @@ protected void service(HttpServletRequest req, HttpServletResponse resp)
             } else if (result instanceof ModelView) {
                 ModelView mv = (ModelView) result;
 
+                // Mettre les données dans la requête
+                for (Map.Entry<String, Object> entry : mv.getData().entrySet()) {
+                    req.setAttribute(entry.getKey(), entry.getValue());
+                }
+
                 // Forward vers JSP
                 RequestDispatcher dispatcher =
                         req.getRequestDispatcher("/" + mv.getView());

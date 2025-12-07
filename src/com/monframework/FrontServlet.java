@@ -5,6 +5,8 @@ import jakarta.servlet.http.*;
 import java.io.*;
 import java.lang.reflect.*;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import com.monframework.annotations.Controller;
 import com.monframework.annotations.Param;
@@ -20,12 +22,49 @@ public class FrontServlet extends HttpServlet {
     private static class MethodMapping {
         Class<?> controllerClass;
         Method method;
+        String originalUrl;
+        Pattern regex;
+        List<String> variables;
 
-        MethodMapping(Class<?> controllerClass, Method method) {
-            this.controllerClass = controllerClass;
-            this.method = method;
+        MethodMapping(Class<?> c, Method m, String url, Pattern regex, List<String> vars) {
+            this.controllerClass = c;
+            this.method = m;
+            this.originalUrl = url;
+            this.regex = regex;
+            this.variables = vars;
         }
     }
+
+    private MethodMapping buildMapping(Class<?> cls, Method m, String url) {
+    List<String> variables = new ArrayList<>();
+
+    // trouver {variable}
+    Matcher matcher = Pattern.compile("\\{([^}]+)\\}").matcher(url);
+    String regex = url;
+
+    while (matcher.find()) {
+        String varName = matcher.group(1);
+        variables.add(varName);
+        regex = regex.replace("{" + varName + "}", "([^/]+)");
+    }
+
+    // regex final
+    Pattern pattern = Pattern.compile("^" + regex + "$");
+
+    return new MethodMapping(cls, m, url, pattern, variables);
+    }
+
+    private Object convert(String value, Class<?> type) {
+    if (value == null) return null;
+    if (type == String.class) return value;
+    if (type == int.class || type == Integer.class) return Integer.parseInt(value);
+    if (type == long.class || type == Long.class) return Long.parseLong(value);
+    if (type == boolean.class || type == Boolean.class) return Boolean.parseBoolean(value);
+    if (type == double.class || type == Double.class) return Double.parseDouble(value);
+    return value; // fallback
+}
+
+
 
     //appelé une seule fois
     @Override
@@ -37,7 +76,9 @@ public class FrontServlet extends HttpServlet {
                 for (Method m : cls.getDeclaredMethods()) {
                     if (m.isAnnotationPresent(UrlMapping.class)) {
                         UrlMapping mapping = m.getAnnotation(UrlMapping.class);
-                        mappings.put(mapping.value(), new MethodMapping(cls, m));
+                        String url = mapping.value();
+                        MethodMapping mm = buildMapping(cls, m, url);
+                        mappings.put(url, mm);
                     }
                 }
             }
@@ -68,7 +109,18 @@ protected void service(HttpServletRequest req, HttpServletResponse resp)
     PrintWriter out = resp.getWriter();
 
     try {
-        MethodMapping mapping = mappings.get(relativePath);
+        MethodMapping mapping = null;
+        Matcher matched = null;
+
+        for (MethodMapping mm : mappings.values()) {
+            Matcher mat = mm.regex.matcher(relativePath);
+            if (mat.matches()) {
+                mapping = mm;
+                matched = mat;
+                break;
+            }
+        }
+
 
         if (mapping != null) {
             out.println("=== ROUTE TROUVÉE ===");
@@ -81,48 +133,27 @@ protected void service(HttpServletRequest req, HttpServletResponse resp)
             // ================================
             //        EXTRACTION ARGUMENTS
             // ================================
-            Parameter[] params = mapping.method.getParameters();
-            Object[] args = new Object[params.length];
+        Object[] args = new Object[mapping.method.getParameterCount()];
+        Parameter[] params = mapping.method.getParameters();
 
-            for (int i = 0; i < params.length; i++) {
-                Parameter p = params[i];
+        for (int i = 0; i < params.length; i++) {
+            String paramName = params[i].getName(); // si @Param absent
+            Param p = params[i].getAnnotation(Param.class);
+            if (p != null) paramName = p.value();
 
-                // Vérifier si @Param est présent
-                Param annotation = p.getAnnotation(Param.class);
+            int indexVar = mapping.variables.indexOf(paramName);
 
-                String paramName;
-                if (annotation != null) {
-                    paramName = annotation.value();   // nom personnalisé
-                } else {
-                    paramName = p.getName();          // nom du paramètre
-                }
-
-                String rawValue = req.getParameter(paramName);
-
-                if (rawValue == null) {
-                    throw new IllegalArgumentException("Paramètre manquant : " + paramName);
-                }
-
-                // Conversion automatique en type Java
-                Class<?> type = p.getType();
-                Object value;
-
-                if (type == int.class || type == Integer.class) {
-                    value = Integer.parseInt(rawValue);
-                } else if (type == double.class || type == Double.class) {
-                    value = Double.parseDouble(rawValue);
-                } else if (type == boolean.class || type == Boolean.class) {
-                    value = Boolean.parseBoolean(rawValue);
-                } else {
-                    value = rawValue; // String
-                }
-
-                args[i] = value;
+            if (indexVar >= 0) {
+                String value = matched.group(indexVar + 1);
+                args[i] = convert(value, params[i].getType());
+            } else {
+                // sinon = GET/POST param classique
+                args[i] = convert(req.getParameter(paramName), params[i].getType());
             }
+        }
 
             // Appel de la méthode AVEC arguments
             Object result = mapping.method.invoke(controllerInstance, args);
-
 
 
             // ================================

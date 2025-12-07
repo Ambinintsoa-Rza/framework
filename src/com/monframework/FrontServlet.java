@@ -7,6 +7,7 @@ import java.lang.reflect.*;
 import java.util.*;
 
 import com.monframework.annotations.Controller;
+import com.monframework.annotations.Param;
 import com.monframework.annotations.UrlMapping;
 import com.monframework.model.ModelView;
 
@@ -77,37 +78,52 @@ protected void service(HttpServletRequest req, HttpServletResponse resp)
 
             Object controllerInstance = mapping.controllerClass.getDeclaredConstructor().newInstance();
 
-            // Préparation des arguments
+            // ================================
+            //        EXTRACTION ARGUMENTS
+            // ================================
             Parameter[] params = mapping.method.getParameters();
             Object[] args = new Object[params.length];
 
             for (int i = 0; i < params.length; i++) {
                 Parameter p = params[i];
-                String paramName = p.getName(); // ATTENTION voir note en bas
-                String value = req.getParameter(paramName);
 
-                if (value == null) {
-                    args[i] = null;
-                    continue;
+                // Vérifier si @Param est présent
+                Param annotation = p.getAnnotation(Param.class);
+
+                String paramName;
+                if (annotation != null) {
+                    paramName = annotation.value();   // nom personnalisé
+                } else {
+                    paramName = p.getName();          // nom du paramètre
                 }
 
-                // Conversion selon le type
+                String rawValue = req.getParameter(paramName);
+
+                if (rawValue == null) {
+                    throw new IllegalArgumentException("Paramètre manquant : " + paramName);
+                }
+
+                // Conversion automatique en type Java
                 Class<?> type = p.getType();
+                Object value;
 
                 if (type == int.class || type == Integer.class) {
-                    args[i] = Integer.parseInt(value);
-                } 
-                else if (type == double.class || type == Double.class) {
-                    args[i] = Double.parseDouble(value);
+                    value = Integer.parseInt(rawValue);
+                } else if (type == double.class || type == Double.class) {
+                    value = Double.parseDouble(rawValue);
+                } else if (type == boolean.class || type == Boolean.class) {
+                    value = Boolean.parseBoolean(rawValue);
+                } else {
+                    value = rawValue; // String
                 }
-                else {
-                    // String, ou autres objets simples
-                    args[i] = value;
-                }
+
+                args[i] = value;
             }
 
-            // Invocation
+            // Appel de la méthode AVEC arguments
             Object result = mapping.method.invoke(controllerInstance, args);
+
+
 
             // ================================
             //      GESTION DES RETOURS

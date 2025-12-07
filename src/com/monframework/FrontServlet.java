@@ -76,7 +76,38 @@ protected void service(HttpServletRequest req, HttpServletResponse resp)
             out.println("=======================");
 
             Object controllerInstance = mapping.controllerClass.getDeclaredConstructor().newInstance();
-            Object result = mapping.method.invoke(controllerInstance);
+
+            // Préparation des arguments
+            Parameter[] params = mapping.method.getParameters();
+            Object[] args = new Object[params.length];
+
+            for (int i = 0; i < params.length; i++) {
+                Parameter p = params[i];
+                String paramName = p.getName(); // ATTENTION voir note en bas
+                String value = req.getParameter(paramName);
+
+                if (value == null) {
+                    args[i] = null;
+                    continue;
+                }
+
+                // Conversion selon le type
+                Class<?> type = p.getType();
+
+                if (type == int.class || type == Integer.class) {
+                    args[i] = Integer.parseInt(value);
+                } 
+                else if (type == double.class || type == Double.class) {
+                    args[i] = Double.parseDouble(value);
+                }
+                else {
+                    // String, ou autres objets simples
+                    args[i] = value;
+                }
+            }
+
+            // Invocation
+            Object result = mapping.method.invoke(controllerInstance, args);
 
             // ================================
             //      GESTION DES RETOURS

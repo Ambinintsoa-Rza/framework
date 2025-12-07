@@ -39,7 +39,7 @@ if "!SOURCES!"=="" (
     exit /b 1
 )
 
-javac -encoding UTF-8 -cp "%SERVLET_API%" -d "%OUT%" !SOURCES!
+javac -parameters -encoding UTF-8 -cp "%SERVLET_API%" -d "%OUT%" !SOURCES!
 if errorlevel 1 (
     echo.
     echo [ERREUR] Échec de la compilation du framework !
@@ -87,7 +87,7 @@ if "!TEST_SOURCES!"=="" (
     echo.
 ) else (
     echo Compilation des contrôleurs...
-    javac -encoding UTF-8 -cp "%SERVLET_API%;%TEST_DIR%\framework.jar" -d "%TEST_OUT%" !TEST_SOURCES!
+javac -parameters -encoding UTF-8 -cp "%SERVLET_API%;%TEST_DIR%\framework.jar" -d "%TEST_OUT%" !TEST_SOURCES!
     if errorlevel 1 (
         echo.
         echo [ERREUR] Échec de la compilation du projet test !

@@ -9,7 +9,9 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import com.monframework.annotations.Controller;
+import com.monframework.annotations.GetMapping;
 import com.monframework.annotations.Param;
+import com.monframework.annotations.PostMapping;
 import com.monframework.annotations.UrlMapping;
 import com.monframework.model.ModelView;
 
@@ -22,23 +24,23 @@ public class FrontServlet extends HttpServlet {
     private static class MethodMapping {
         Class<?> controllerClass;
         Method method;
-        String originalUrl;
+        String httpMethod; // GET ou POST
         Pattern regex;
         List<String> variables;
 
-        MethodMapping(Class<?> c, Method m, String url, Pattern regex, List<String> vars) {
+        MethodMapping(Class<?> c, Method m, String httpMethod, Pattern regex, List<String> vars) {
             this.controllerClass = c;
             this.method = m;
-            this.originalUrl = url;
+            this.httpMethod = httpMethod;
             this.regex = regex;
             this.variables = vars;
         }
     }
 
-    private MethodMapping buildMapping(Class<?> cls, Method m, String url) {
+
+private MethodMapping buildMapping(Class<?> cls, Method m, String url, String httpMethod) {
     List<String> variables = new ArrayList<>();
 
-    // trouver {variable}
     Matcher matcher = Pattern.compile("\\{([^}]+)\\}").matcher(url);
     String regex = url;
 
@@ -48,11 +50,11 @@ public class FrontServlet extends HttpServlet {
         regex = regex.replace("{" + varName + "}", "([^/]+)");
     }
 
-    // regex final
     Pattern pattern = Pattern.compile("^" + regex + "$");
 
-    return new MethodMapping(cls, m, url, pattern, variables);
-    }
+    return new MethodMapping(cls, m, httpMethod, pattern, variables);
+}
+
 
     private Object convert(String value, Class<?> type) {
     if (value == null) return null;
@@ -74,11 +76,22 @@ public class FrontServlet extends HttpServlet {
 
             for (Class<?> cls : controllers) {
                 for (Method m : cls.getDeclaredMethods()) {
+                    if (m.isAnnotationPresent(GetMapping.class)) {
+                        String url = m.getAnnotation(GetMapping.class).value();
+                        MethodMapping mm = buildMapping(cls, m, url, "GET");
+                        mappings.put(url + "_GET", mm);
+                    }
+
+                    if (m.isAnnotationPresent(PostMapping.class)) {
+                        String url = m.getAnnotation(PostMapping.class).value();
+                        MethodMapping mm = buildMapping(cls, m, url, "POST");
+                        mappings.put(url + "_POST", mm);
+                    }
+
                     if (m.isAnnotationPresent(UrlMapping.class)) {
-                        UrlMapping mapping = m.getAnnotation(UrlMapping.class);
-                        String url = mapping.value();
-                        MethodMapping mm = buildMapping(cls, m, url);
-                        mappings.put(url, mm);
+                        String url = m.getAnnotation(UrlMapping.class).value();
+                        MethodMapping mm = buildMapping(cls, m, url, "ANY");
+                        mappings.put(url + "_ANY", mm);
                     }
                 }
             }
@@ -112,9 +125,16 @@ protected void service(HttpServletRequest req, HttpServletResponse resp)
         MethodMapping mapping = null;
         Matcher matched = null;
 
+        String httpMethod = req.getMethod(); // GET ou POST
+
         for (MethodMapping mm : mappings.values()) {
             Matcher mat = mm.regex.matcher(relativePath);
             if (mat.matches()) {
+
+                // vérification GET/POST/ANY
+                if (!mm.httpMethod.equals("ANY") && !mm.httpMethod.equals(httpMethod)) {
+                    continue; // méthode HTTP incorrecte → on skip
+                }
                 mapping = mm;
                 matched = mat;
                 break;

@@ -1,6 +1,7 @@
 package com.monframework;
 
 import jakarta.servlet.*;
+import jakarta.servlet.annotation.MultipartConfig;
 import jakarta.servlet.http.*;
 import java.io.*;
 import java.lang.reflect.*;
@@ -14,8 +15,14 @@ import com.monframework.annotations.Param;
 import com.monframework.annotations.PostMapping;
 import com.monframework.annotations.UrlMapping;
 import com.monframework.model.ModelView;
+import com.monframework.model.UploadedFile;
 import com.monframework.annotations.Json;
 
+@MultipartConfig(
+    fileSizeThreshold = 1024 * 1024,      // 1 MB avant écriture sur disque
+    maxFileSize = 1024 * 1024 * 10,       // 10 MB max par fichier
+    maxRequestSize = 1024 * 1024 * 50     // 50 MB max pour la requête totale
+)
 public class FrontServlet extends HttpServlet {
 
     // Map qui relie une URL à sa méthode et son contrôleur
@@ -210,6 +217,61 @@ private MethodMapping buildMapping(Class<?> cls, Method m, String url, String ht
         return instance;
     }
 
+    // === Sprint 10 : Helpers pour l'upload de fichiers ===
+    
+    /**
+     * Vérifie si la requête est multipart (upload de fichiers)
+     */
+    private boolean isMultipartRequest(HttpServletRequest req) {
+        String contentType = req.getContentType();
+        return contentType != null && contentType.toLowerCase().startsWith("multipart/");
+    }
+
+    /**
+     * Extrait le nom de fichier original depuis le header Content-Disposition
+     */
+    private String extractFileName(Part part) {
+        String contentDisp = part.getHeader("content-disposition");
+        if (contentDisp != null) {
+            for (String token : contentDisp.split(";")) {
+                if (token.trim().startsWith("filename")) {
+                    String name = token.substring(token.indexOf('=') + 1).trim().replace("\"", "");
+                    // Gérer les chemins Windows (C:\path\file.txt → file.txt)
+                    int lastSlash = Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\'));
+                    if (lastSlash >= 0) {
+                        name = name.substring(lastSlash + 1);
+                    }
+                    return name;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Convertit un Part en UploadedFile
+     */
+    private UploadedFile partToUploadedFile(Part part) throws IOException {
+        if (part == null) return null;
+        
+        String fileName = extractFileName(part);
+        if (fileName == null || fileName.isEmpty()) return null;
+        
+        String contentType = part.getContentType();
+        
+        // Lire le contenu binaire
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        try (InputStream is = part.getInputStream()) {
+            byte[] buffer = new byte[4096];
+            int bytesRead;
+            while ((bytesRead = is.read(buffer)) != -1) {
+                baos.write(buffer, 0, bytesRead);
+            }
+        }
+        
+        return new UploadedFile(fileName, contentType, baos.toByteArray());
+    }
+
 
 
     //appelé une seule fois
@@ -330,6 +392,25 @@ protected void service(HttpServletRequest req, HttpServletResponse resp)
                 }
                 
                 args[i] = allParams;
+                continue;
+            }
+
+            // === Sprint 10 : Support UploadedFile ===
+            if (UploadedFile.class.isAssignableFrom(paramType)) {
+                String paramName = params[i].getName();
+                Param p = params[i].getAnnotation(Param.class);
+                if (p != null) paramName = p.value();
+                
+                if (isMultipartRequest(req)) {
+                    try {
+                        Part part = req.getPart(paramName);
+                        args[i] = partToUploadedFile(part);
+                    } catch (Exception e) {
+                        args[i] = null;
+                    }
+                } else {
+                    args[i] = null;
+                }
                 continue;
             }
 

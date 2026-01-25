@@ -14,6 +14,7 @@ import com.monframework.annotations.Param;
 import com.monframework.annotations.PostMapping;
 import com.monframework.annotations.UrlMapping;
 import com.monframework.model.ModelView;
+import com.monframework.annotations.Json;
 
 public class FrontServlet extends HttpServlet {
 
@@ -73,6 +74,101 @@ private MethodMapping buildMapping(Class<?> cls, Method m, String url, String ht
                 || type == long.class || type == Long.class
                 || type == boolean.class || type == Boolean.class
                 || type == double.class || type == Double.class;
+    }
+
+    // --- JSON helpers ---
+    private String escapeJson(String s) {
+        if (s == null) return null;
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '\\': sb.append("\\\\"); break;
+                case '"': sb.append("\\\""); break;
+                case '\n': sb.append("\\n"); break;
+                case '\r': sb.append("\\r"); break;
+                case '\t': sb.append("\\t"); break;
+                case '\b': sb.append("\\b"); break;
+                case '\f': sb.append("\\f"); break;
+                default:
+                    if (c < 0x20) {
+                        sb.append(String.format("\\u%04x", (int)c));
+                    } else {
+                        sb.append(c);
+                    }
+            }
+        }
+        return sb.toString();
+    }
+
+    private String toJson(Object obj) {
+        if (obj == null) return "null";
+        if (obj instanceof String) return '"' + escapeJson((String)obj) + '"';
+        if (obj instanceof Number || obj instanceof Boolean) return String.valueOf(obj);
+
+        if (obj instanceof Map) {
+            StringBuilder sb = new StringBuilder();
+            sb.append('{');
+            boolean first = true;
+            for (Object eObj : ((Map<?,?>)obj).entrySet()) {
+                Map.Entry<?,?> e = (Map.Entry<?,?>) eObj;
+                if (!first) sb.append(',');
+                first = false;
+                sb.append('"').append(escapeJson(String.valueOf(e.getKey()))).append('"').append(':')
+                  .append(toJson(e.getValue()));
+            }
+            sb.append('}');
+            return sb.toString();
+        }
+
+        if (obj instanceof Collection) {
+            StringBuilder sb = new StringBuilder();
+            sb.append('[');
+            boolean first = true;
+            for (Object item : (Collection<?>)obj) {
+                if (!first) sb.append(',');
+                first = false;
+                sb.append(toJson(item));
+            }
+            sb.append(']');
+            return sb.toString();
+        }
+
+        if (obj.getClass().isArray()) {
+            StringBuilder sb = new StringBuilder();
+            sb.append('[');
+            int len = java.lang.reflect.Array.getLength(obj);
+            for (int i = 0; i < len; i++) {
+                if (i > 0) sb.append(',');
+                Object v = java.lang.reflect.Array.get(obj, i);
+                sb.append(toJson(v));
+            }
+            sb.append(']');
+            return sb.toString();
+        }
+
+        // Fallback POJO: sérialiser ses champs déclarés
+        StringBuilder sb = new StringBuilder();
+        sb.append('{');
+        boolean first = true;
+        Class<?> c = obj.getClass();
+        while (c != null && c != Object.class) {
+            for (Field f : c.getDeclaredFields()) {
+                int mod = f.getModifiers();
+                if (Modifier.isStatic(mod)) continue;
+                f.setAccessible(true);
+                try {
+                    Object v = f.get(obj);
+                    if (!first) sb.append(',');
+                    first = false;
+                    sb.append('"').append(escapeJson(f.getName())).append('"').append(':')
+                      .append(toJson(v));
+                } catch (IllegalAccessException ignored) {}
+            }
+            c = c.getSuperclass();
+        }
+        sb.append('}');
+        return sb.toString();
     }
 
     // Tentative de remplissage d'un champ d'objet depuis une valeur String
@@ -191,10 +287,13 @@ protected void service(HttpServletRequest req, HttpServletResponse resp)
 
 
         if (mapping != null) {
-            out.println("=== ROUTE TROUVÉE ===");
-            out.println("Controller : " + mapping.controllerClass.getName());
-            out.println("Méthode    : " + mapping.method.getName());
-            out.println("=======================");
+            boolean wantsJson = mapping.method.isAnnotationPresent(Json.class);
+            if (!wantsJson) {
+                out.println("=== ROUTE TROUVÉE ===");
+                out.println("Controller : " + mapping.controllerClass.getName());
+                out.println("Méthode    : " + mapping.method.getName());
+                out.println("=======================");
+            }
 
             Object controllerInstance = mapping.controllerClass.getDeclaredConstructor().newInstance();
 
@@ -267,8 +366,16 @@ protected void service(HttpServletRequest req, HttpServletResponse resp)
             //      GESTION DES RETOURS
             // ================================
 
-            if (result instanceof String) {
-                out.println(result);
+            if (mapping.method.isAnnotationPresent(Json.class)) {
+                // JSON response
+                resp.setContentType("application/json;charset=UTF-8");
+                String payload;
+                if (result instanceof ModelView) {
+                    payload = toJson(((ModelView) result).getData());
+                } else {
+                    payload = toJson(result);
+                }
+                out.print(payload);
 
             } else if (result instanceof ModelView) {
                 ModelView mv = (ModelView) result;

@@ -66,6 +66,54 @@ private MethodMapping buildMapping(Class<?> cls, Method m, String url, String ht
     return value; // fallback
 }
 
+    // Types simples gérés directement via convert()
+    private boolean isSimpleType(Class<?> type) {
+        return type == String.class
+                || type == int.class || type == Integer.class
+                || type == long.class || type == Long.class
+                || type == boolean.class || type == Boolean.class
+                || type == double.class || type == Double.class;
+    }
+
+    // Tentative de remplissage d'un champ d'objet depuis une valeur String
+    private void trySetField(Object instance, String fieldName, String stringValue) {
+        if (stringValue == null) return;
+        Class<?> cls = instance.getClass();
+        try {
+            Field f = cls.getDeclaredField(fieldName);
+            f.setAccessible(true);
+            Object converted = convert(stringValue, f.getType());
+            f.set(instance, converted);
+        } catch (NoSuchFieldException e) {
+            // champ introuvable → on ignore
+        } catch (Exception e) {
+            // problème de conversion/affectation → on ignore pour ne pas casser la requête
+        }
+    }
+
+    // Création et binding d'un objet paramètre à partir des paramètres requête + variables de chemin
+    private Object bindObjectParam(HttpServletRequest req, Matcher matched, MethodMapping mapping, Class<?> paramType) throws Exception {
+        Object instance = paramType.getDeclaredConstructor().newInstance();
+
+        // 1) Variables de l'URL (path variables)
+        for (int j = 0; j < mapping.variables.size(); j++) {
+            String varName = mapping.variables.get(j);
+            String varValue = matched.group(j + 1);
+            trySetField(instance, varName, varValue);
+        }
+
+        // 2) Paramètres GET/POST classiques
+        Map<String, String[]> requestParams = req.getParameterMap();
+        for (Map.Entry<String, String[]> entry : requestParams.entrySet()) {
+            String key = entry.getKey();
+            String[] values = entry.getValue();
+            String val = (values != null && values.length > 0) ? values[0] : null;
+            trySetField(instance, key, val);
+        }
+
+        return instance;
+    }
+
 
 
     //appelé une seule fois
@@ -184,6 +232,16 @@ protected void service(HttpServletRequest req, HttpServletResponse resp)
                 
                 args[i] = allParams;
                 continue;
+            }
+
+            // === Sprint 8-bis : Support des objets comme paramètres ===
+            if (!isSimpleType(paramType)) {
+                try {
+                    args[i] = bindObjectParam(req, matched, mapping, paramType);
+                    continue;
+                } catch (Exception e) {
+                    // si échec du binding, on continue vers la logique classique
+                }
             }
             
             String paramName = params[i].getName(); // si @Param absent

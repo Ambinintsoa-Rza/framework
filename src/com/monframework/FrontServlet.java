@@ -157,6 +157,35 @@ protected void service(HttpServletRequest req, HttpServletResponse resp)
         Parameter[] params = mapping.method.getParameters();
 
         for (int i = 0; i < params.length; i++) {
+            Class<?> paramType = params[i].getType();
+            
+            // === Sprint 8 : Support Map<String, Object> ===
+            if (Map.class.isAssignableFrom(paramType)) {
+                // Créer une Map avec tous les paramètres de la requête
+                Map<String, Object> allParams = new HashMap<>();
+                
+                // Ajouter les paramètres GET/POST classiques
+                Map<String, String[]> requestParams = req.getParameterMap();
+                for (Map.Entry<String, String[]> entry : requestParams.entrySet()) {
+                    String[] values = entry.getValue();
+                    if (values.length == 1) {
+                        allParams.put(entry.getKey(), values[0]);
+                    } else {
+                        allParams.put(entry.getKey(), values);
+                    }
+                }
+                
+                // Ajouter aussi les variables de l'URL (path variables)
+                for (int j = 0; j < mapping.variables.size(); j++) {
+                    String varName = mapping.variables.get(j);
+                    String varValue = matched.group(j + 1);
+                    allParams.put(varName, varValue);
+                }
+                
+                args[i] = allParams;
+                continue;
+            }
+            
             String paramName = params[i].getName(); // si @Param absent
             Param p = params[i].getAnnotation(Param.class);
             if (p != null) paramName = p.value();

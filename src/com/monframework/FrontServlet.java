@@ -13,6 +13,7 @@ import com.monframework.annotations.Controller;
 import com.monframework.annotations.GetMapping;
 import com.monframework.annotations.Param;
 import com.monframework.annotations.PostMapping;
+import com.monframework.annotations.Session;
 import com.monframework.annotations.UrlMapping;
 import com.monframework.model.ModelView;
 import com.monframework.model.UploadedFile;
@@ -368,7 +369,24 @@ protected void service(HttpServletRequest req, HttpServletResponse resp)
         for (int i = 0; i < params.length; i++) {
             Class<?> paramType = params[i].getType();
             
-            // === Sprint 8 : Support Map<String, Object> ===
+            // === Support @Session : Map<String, Object> pour la session ===
+            if (Map.class.isAssignableFrom(paramType) && params[i].isAnnotationPresent(Session.class)) {
+                // Récupérer ou créer la session HTTP
+                HttpSession httpSession = req.getSession(true);
+                
+                // Créer une Map et charger les données depuis HttpSession
+                Map<String, Object> sessionMap = new HashMap<>();
+                java.util.Enumeration<String> attrNames = httpSession.getAttributeNames();
+                while (attrNames.hasMoreElements()) {
+                    String name = attrNames.nextElement();
+                    sessionMap.put(name, httpSession.getAttribute(name));
+                }
+                
+                args[i] = sessionMap;
+                continue;
+            }
+
+            // === Sprint 8 : Support Map<String, Object> pour les paramètres ===
             if (Map.class.isAssignableFrom(paramType)) {
                 // Créer une Map avec tous les paramètres de la requête
                 Map<String, Object> allParams = new HashMap<>();
@@ -442,6 +460,19 @@ protected void service(HttpServletRequest req, HttpServletResponse resp)
             // Appel de la méthode AVEC arguments
             Object result = mapping.method.invoke(controllerInstance, args);
 
+            // === Synchronisation @Session Map vers HttpSession ===
+            for (int i = 0; i < params.length; i++) {
+                if (params[i].isAnnotationPresent(Session.class) && args[i] instanceof Map) {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> sessionMap = (Map<String, Object>) args[i];
+                    HttpSession httpSession = req.getSession(true);
+                    
+                    // Synchroniser toutes les données de la Map vers HttpSession
+                    for (Map.Entry<String, Object> entry : sessionMap.entrySet()) {
+                        httpSession.setAttribute(entry.getKey(), entry.getValue());
+                    }
+                }
+            }
 
             // ================================
             //      GESTION DES RETOURS
